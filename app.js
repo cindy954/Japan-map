@@ -509,9 +509,12 @@
       '</div>' +
       (it.note ? '<p class="place-note">' + esc(it.note) + '</p>' : '') +
       '<div class="place-actions">' +
-        '<a class="act act-map" href="' + esc(maps) + '" target="_blank" rel="noopener">📍 구글맵</a>' +
-        '<a class="act act-tabelog" href="' + esc(tabelog) + '" target="_blank" rel="noopener">🍽️ 타베로그</a>' +
-        '<button class="act act-copy" type="button" data-act="copy">📋 이름 복사</button>' +
+        '<a class="act act-map" href="' + esc(maps) + '" target="_blank" rel="noopener">' +
+          '📍<span class="act-label">구글맵</span></a>' +
+        '<a class="act act-tabelog" href="' + esc(tabelog) + '" target="_blank" rel="noopener">' +
+          '🍽️<span class="act-label">타베로그</span></a>' +
+        '<button class="act act-copy" type="button" data-act="copy">' +
+          '📋<span class="act-label">이름 복사</span></button>' +
       '</div>' +
     '</article>';
   }
@@ -643,7 +646,7 @@
         try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) { /* 무시 */ }
       }
     }
-    toast(count + '줄을 하나로 합쳤어요 · ' + merged.name);
+    toast(count + '줄을 하나로 합쳤어요');
   }
 
   function findItem(id) {
