@@ -275,7 +275,7 @@
     if (ocrWorker) return Promise.resolve(ocrWorker);
     if (ocrWorkerPromise) return ocrWorkerPromise;
     ocrWorkerPromise = loadTesseract().then(function (T) {
-      return T.createWorker('jpn+eng', 1, {
+      return T.createWorker('jpn+eng+kor', 1, {
         logger: function (m) { if (progressSink) progressSink(m); },
         errorHandler: function (e) { console.warn('[tesseract]', e); }
       }).then(function (w) {
@@ -311,67 +311,41 @@
     return loadImageEl(file);
   }
 
-  /* OCR 전처리: 크기 보정 + 회색조/대비 + (어두운 캡쳐면) 반전 */
+  /* OCR 전처리: 아주 큰 사진만 줄이고 나머지는 원본 그대로 넘깁니다.
+     (회색조·대비 보정은 오히려 일본어 한자 인식률을 떨어뜨려서 넣지 않았어요) */
   function preprocess(file) {
     if (!file || !file.size) return Promise.resolve(file);
     return loadBitmap(file).then(function (src) {
       var sw = src.width || src.naturalWidth || 0;
       var sh = src.height || src.naturalHeight || 0;
-      if (!sw || !sh) throw new Error('이미지 크기를 알 수 없어요');
-
       var longSide = Math.max(sw, sh);
-      var scale = 1;
-      if (longSide < 1500) scale = Math.min(2, 1500 / longSide);
-      else if (longSide > 2200) scale = 2200 / longSide;
 
-      var w = Math.round(sw * scale);
-      var h = Math.round(sh * scale);
-      var maxPixels = 4600000;
-      if (w * h > maxPixels) {
-        var k = Math.sqrt(maxPixels / (w * h));
-        w = Math.max(1, Math.round(w * k));
-        h = Math.max(1, Math.round(h * k));
+      function release() {
+        if (src.close) src.close();
+        else if (src.__url) URL.revokeObjectURL(src.__url);
       }
 
+      if (!sw || !sh || longSide <= 2400) {
+        release();
+        return file;
+      }
+
+      var scale = 2400 / longSide;
+      var w = Math.max(1, Math.round(sw * scale));
+      var h = Math.max(1, Math.round(sh * scale));
       var canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
-      var ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) throw new Error('캔버스를 쓸 수 없어요');
+      var ctx = canvas.getContext('2d');
+      if (!ctx) { release(); return file; }
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(src, 0, 0, w, h);
-
-      if (src.close) src.close();
-      else if (src.__url) URL.revokeObjectURL(src.__url);
-
-      try {
-        var data = ctx.getImageData(0, 0, w, h);
-        var px = data.data;
-        var sum = 0;
-        var n = 0;
-        for (var s = 0; s < px.length; s += 4 * 41) {
-          sum += px[s] * 0.299 + px[s + 1] * 0.587 + px[s + 2] * 0.114;
-          n += 1;
-        }
-        var mean = n ? sum / n : 210;
-        var invert = mean < 100; /* 다크모드 캡쳐면 흑백 반전 */
-        for (var i = 0; i < px.length; i += 4) {
-          var g = px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114;
-          var v = (g - 132) * 1.32 + 138;
-          if (invert) v = 255 - v;
-          if (v < 0) v = 0;
-          else if (v > 255) v = 255;
-          px[i] = px[i + 1] = px[i + 2] = v;
-        }
-        ctx.putImageData(data, 0, 0);
-      } catch (e) {
-        /* 색 보정에 실패해도 원본 그대로 인식 진행 */
-      }
+      release();
 
       return new Promise(function (resolve) {
         if (!canvas.toBlob) { resolve(file); return; }
-        canvas.toBlob(function (blob) { resolve(blob || file); }, 'image/jpeg', 0.92);
+        canvas.toBlob(function (blob) { resolve(blob || file); }, 'image/png');
       });
     }).catch(function () {
       return file;

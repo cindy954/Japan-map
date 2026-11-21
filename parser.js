@@ -45,6 +45,8 @@
     { reason: '링크', test: function (t) { return /https?:\/\/|www\./i.test(t); } },
     { reason: '해시태그', test: function (t) { return /^#/.test(t) && !JP_CHAR.test(t); } },
     { reason: '계정 태그', test: function (t) { return /^@[\w._]{2,}$/.test(t); } },
+    /* OCR이 글자를 잘못 읽어 생긴 기호·대문자 덩어리 */
+    { reason: '인식 오류', test: function (t) { return /[|=\[\]{}<>\\^_~]/.test(t); } },
     {
       reason: '시간·가격',
       test: function (t) {
