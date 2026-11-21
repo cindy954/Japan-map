@@ -1,4 +1,4 @@
-/* app.js — 화면 조작 + 브라우저 OCR(Tesseract.js) + 결과 카드 */
+/* app.js — 화면 조작 + AI 비전(기본) · 브라우저 OCR(폴백) + 결과 카드 */
 (function () {
   'use strict';
 
@@ -17,6 +17,14 @@
     'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
     'https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js'
   ];
+
+  /* AI 비전 프록시 (Cloudflare Worker) — 사진에서 일본어 가게명만 뽑아 옵니다.
+     네트워크 오류·429(무료 한도)·5xx로 실패하면 Tesseract.js 브라우저 OCR로 자동 폴백해요. */
+  var VISION_ENDPOINT = 'https://polished-shape-141d.rlatlsel12.workers.dev';
+  var VISION_MAX_SIDE = 1400;
+  var VISION_QUALITY = 0.85;
+  var VISION_TIMEOUT_MS = 25000;
+  var FALLBACK_BADGE = 'AI 한도 초과/연결 지연으로 기본 OCR 모드로 전환했어요';
 
   var STATUS_LABEL = {
     'loading tesseract core': 'OCR 엔진 내려받는 중',
@@ -48,6 +56,7 @@
     items: [],
     photos: [],
     busy: false,
+    visionOff: false,
     seq: 0,
     mergeMode: false,
     mergeSel: {}
@@ -204,10 +213,12 @@
     box.innerHTML = state.photos.map(function (p) {
       var badge = '';
       var cls = '';
-      if (p.status === 'done') { badge = '완료'; cls = ' is-done'; }
+      if (p.status === 'done') { badge = p.engine === 'ocr' ? 'OCR 완료' : 'AI 완료'; cls = ' is-done'; }
       else if (p.status === 'error') { badge = '실패'; cls = ' is-error'; }
-      else if (p.status === 'working') { badge = Math.round((p.progress || 0) * 100) + '%'; }
-      else { badge = '대기'; }
+      else if (p.status === 'working') {
+        if (p.engine === 'ocr') badge = (p.progress > 0 ? Math.round(p.progress * 100) + '%' : 'OCR');
+        else badge = 'AI';
+      } else { badge = '대기'; }
       return '<figure class="thumb" data-photo="' + p.id + '">' +
         (p.url ? '<img src="' + esc(p.url) + '" alt="업로드한 캡쳐">' : '') +
         '<figcaption class="thumb-badge' + cls + '">' + badge + '</figcaption>' +
@@ -354,7 +365,187 @@
     });
   }
 
-  function runOcr() {
+  /* ---------------- AI 비전 ---------------- */
+
+  function fallbackDetail(err) {
+    var kind = err && err.kind;
+    if (kind === 'quota') return '무료 AI 인식 한도를 다 썼어요. 사진은 이 브라우저 안에서 직접 읽고, 결과는 그대로 나와요.';
+    if (kind === 'timeout') return 'AI 응답이 느려서 사진을 브라우저 안에서 직접 읽고 있어요. 결과는 그대로 나와요.';
+    if (kind === 'network') return 'AI 서버에 연결하지 못해 브라우저 안에서 직접 읽고 있어요. 결과는 그대로 나와요.';
+    return 'AI 서버가 잠시 응답하지 않아 브라우저 안에서 직접 읽고 있어요. 결과는 그대로 나와요.';
+  }
+
+  function showEngineBadge(detail) {
+    var el = $('engine-badge');
+    if (!el) return;
+    var text = $('engine-badge-text');
+    var sub = $('engine-badge-detail');
+    if (text) text.textContent = FALLBACK_BADGE;
+    if (sub) { sub.textContent = detail || ''; sub.hidden = !detail; }
+    el.hidden = false;
+  }
+
+  function hideEngineBadge() {
+    var el = $('engine-badge');
+    if (el) el.hidden = true;
+  }
+
+  /* 사진을 AI 서버로 보낼 형태로: 긴 변 1400px, JPEG 품질 0.85, base64 */
+  function toVisionPayload(file) {
+    return loadBitmap(file).then(function (src) {
+      var sw = src.width || src.naturalWidth || 0;
+      var sh = src.height || src.naturalHeight || 0;
+
+      function release() {
+        if (src.close) src.close();
+        else if (src.__url) URL.revokeObjectURL(src.__url);
+      }
+
+      if (!sw || !sh) { release(); throw new Error('이미지를 읽지 못했어요'); }
+
+      var scale = Math.min(1, VISION_MAX_SIDE / Math.max(sw, sh));
+      var w = Math.max(1, Math.round(sw * scale));
+      var h = Math.max(1, Math.round(sh * scale));
+      var canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      var ctx = canvas.getContext('2d');
+      if (!ctx || typeof canvas.toDataURL !== 'function') {
+        release();
+        throw new Error('이미지를 변환하지 못했어요');
+      }
+      /* 투명 PNG가 검게 나오지 않게 흰 바탕 */
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(src, 0, 0, w, h);
+      release();
+
+      var dataUrl = canvas.toDataURL('image/jpeg', VISION_QUALITY);
+      var comma = String(dataUrl || '').indexOf(',');
+      if (comma === -1) throw new Error('이미지를 변환하지 못했어요');
+      return { imageBase64: dataUrl.slice(comma + 1), mimeType: 'image/jpeg' };
+    });
+  }
+
+  function visionError(kind, message) {
+    var err = new Error(message || 'AI 인식 실패');
+    err.kind = kind;
+    return err;
+  }
+
+  /* POST { imageBase64, mimeType } → { places: [ … ] } */
+  function callVision(payload) {
+    if (typeof fetch !== 'function') return Promise.reject(visionError('network', 'fetch 없음'));
+
+    var ctrl = null;
+    try { if (typeof AbortController === 'function') ctrl = new AbortController(); } catch (e) { ctrl = null; }
+    var timer = setTimeout(function () {
+      if (ctrl) { try { ctrl.abort(); } catch (e) { /* 무시 */ } }
+    }, VISION_TIMEOUT_MS);
+
+    var opts = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    };
+    if (ctrl) opts.signal = ctrl.signal;
+
+    return fetch(VISION_ENDPOINT, opts).then(function (res) {
+      clearTimeout(timer);
+      if (!res || res.ok === false) {
+        var status = (res && res.status) || 0;
+        throw visionError(status === 429 ? 'quota' : (status >= 500 ? 'server' : 'request'), 'AI 서버 응답 ' + status);
+      }
+      return res.json().then(function (data) {
+        var places = data && data.places;
+        if (!Array.isArray(places)) throw visionError('format', 'AI 응답 형식 오류');
+        return places;
+      }, function () {
+        throw visionError('format', 'AI 응답을 읽지 못했어요');
+      });
+    }, function (err) {
+      clearTimeout(timer);
+      if (err && err.kind) throw err;
+      if (err && err.name === 'AbortError') throw visionError('timeout', 'AI 응답 시간 초과');
+      throw visionError('network', 'AI 서버 연결 실패');
+    });
+  }
+
+  /* ---------------- 인식 실행 (AI 비전 → 실패하면 OCR 폴백) ---------------- */
+
+  function engineSummary(ctx) {
+    var parts = [];
+    if (ctx.visionCount) parts.push('AI ' + ctx.visionCount + '장');
+    if (ctx.ocrCount) parts.push('OCR ' + ctx.ocrCount + '장');
+    return parts.length ? parts.join(' + ') + ' 인식 · ' : '';
+  }
+
+  function stageLabel(ctx, index, p, label) {
+    var ratio = (ctx.finished + (p && p.progress ? p.progress : 0)) / ctx.total;
+    setProgress(ratio, (index + 1) + '/' + ctx.total + '장 · ' + label);
+  }
+
+  /* Tesseract.js 브라우저 OCR (폴백 엔진) */
+  function ocrPhoto(p, index, ctx) {
+    stageLabel(ctx, index, p, '브라우저 OCR 준비 중');
+
+    progressSink = function (m) {
+      if (!m || !m.status) return;
+      var pr = typeof m.progress === 'number' ? m.progress : 0;
+      if (m.status === 'recognizing text' && pr > 0) {
+        p.progress = pr;
+        updateThumbProgress(p);
+      }
+      var label = STATUS_LABEL[m.status] || '처리 중';
+      if (pr > 0) label += ' ' + Math.round(pr * 100) + '%';
+      stageLabel(ctx, index, p, label);
+    };
+
+    return preprocess(p.file).then(function (blob) {
+      return ensureWorker().then(function (worker) { return worker.recognize(blob); });
+    }).then(function (result) {
+      progressSink = null;
+      p.text = (result && result.data && result.data.text) || '';
+      p.engine = 'ocr';
+      ctx.ocrCount += 1;
+      return ingestText(p.text, 'ocr');
+    }, function (err) {
+      progressSink = null;
+      throw err;
+    });
+  }
+
+  /* 사진 한 장: AI 먼저 → 실패하면 안내 배지 + OCR 폴백 */
+  function recognizePhoto(p, index, ctx) {
+    p.status = 'working';
+    p.progress = 0;
+    p.error = '';
+    p.engine = ctx.visionOff ? 'ocr' : 'vision';
+    renderPhotos();
+    stageLabel(ctx, index, p, ctx.visionOff ? '브라우저 OCR 준비 중' : 'AI가 가게명 읽는 중');
+
+    if (ctx.visionOff) return ocrPhoto(p, index, ctx);
+
+    return toVisionPayload(p.file).then(callVision).then(function (places) {
+      p.text = places.join('\n');
+      p.engine = 'vision';
+      p.progress = 1;
+      ctx.visionCount += 1;
+      return ingestPlaces(places, 'vision');
+    }).catch(function (err) {
+      /* 한도 소진은 새로고침 전까지 OCR로, 그 밖의 오류는 이번 묶음만 OCR로 */
+      if (err && err.kind === 'quota') state.visionOff = true;
+      ctx.visionOff = true;
+      showEngineBadge(fallbackDetail(err));
+      p.engine = 'ocr';
+      p.progress = 0;
+      renderPhotos();
+      return ocrPhoto(p, index, ctx);
+    });
+  }
+
+  function runRecognition() {
     if (state.busy) return;
     var pending = state.photos.filter(function (p) { return p.status !== 'done'; });
     if (!pending.length) {
@@ -363,52 +554,35 @@
     }
 
     state.busy = true;
+    hideEngineBadge();
     renderPhotos();
     showProgress(true);
 
-    var total = pending.length;
-    var finished = 0;
+    var ctx = {
+      total: pending.length,
+      finished: 0,
+      visionOff: state.visionOff,
+      visionCount: 0,
+      ocrCount: 0
+    };
     var found = 0;
     var firstError = '';
 
     var chain = Promise.resolve();
     pending.forEach(function (p, index) {
       chain = chain.then(function () {
-        p.status = 'working';
-        p.progress = 0;
-        p.error = '';
-        renderPhotos();
-        setProgress(finished / total, (index + 1) + '/' + total + '장 · 준비 중');
-
-        progressSink = function (m) {
-          if (!m || !m.status) return;
-          var pr = typeof m.progress === 'number' ? m.progress : 0;
-          if (m.status === 'recognizing text') {
-            p.progress = pr;
-            if (pr > 0) updateThumbProgress(p);
-          }
-          var label = STATUS_LABEL[m.status] || '처리 중';
-          if (pr > 0) label += ' ' + Math.round(pr * 100) + '%';
-          setProgress((finished + (p.progress || 0)) / total, (index + 1) + '/' + total + '장 · ' + label);
-        };
-
-        return preprocess(p.file).then(function (blob) {
-          return ensureWorker().then(function (worker) {
-            return worker.recognize(blob);
-          });
-        }).then(function (result) {
-          p.text = (result && result.data && result.data.text) || '';
+        return recognizePhoto(p, index, ctx).then(function (n) {
+          found += n || 0;
           p.status = 'done';
           p.progress = 1;
-          found += ingestText(p.text, 'photo');
         }).catch(function (err) {
           p.status = 'error';
           p.error = (err && err.message) || '인식 실패';
           if (!firstError) firstError = p.error;
         }).then(function () {
           progressSink = null;
-          finished += 1;
-          setProgress(finished / total, finished + '/' + total + '장 완료');
+          ctx.finished += 1;
+          setProgress(ctx.finished / ctx.total, ctx.finished + '/' + ctx.total + '장 완료');
           renderPhotos();
         });
       });
@@ -422,7 +596,7 @@
       if (found > 0) {
         $('excluded').open = false;
         scrollToResults();
-        toast(found + '개 가게 후보를 찾았어요');
+        toast(engineSummary(ctx) + found + '개 가게 후보를 찾았어요');
       } else if (firstError && /network|fetch|Failed|en-US/i.test(firstError)) {
         toast('인식 데이터를 내려받지 못했어요. 네트워크 확인 후 다시 시도해 주세요');
       } else {
@@ -434,8 +608,16 @@
   /* ---------------- 항목 ---------------- */
 
   function ingestText(text, source) {
-    var parsed = P.parseText(text);
-    if (!parsed.length) return 0;
+    return ingestParsed(P.parseText(text), source);
+  }
+
+  /* AI 비전 결과(가게 이름 배열) 담기 */
+  function ingestPlaces(places, source) {
+    return ingestParsed(P.parsePlaces(places), source);
+  }
+
+  function ingestParsed(parsed, source) {
+    if (!parsed || !parsed.length) return 0;
 
     var seen = Object.create(null);
     state.items.forEach(function (it) { seen[P.dedupeKey(it.name) + '|' + (it.checked ? 'c' : 'n')] = true; });
@@ -732,7 +914,20 @@
       if (fig) removePhoto(fig.getAttribute('data-photo'));
     });
 
-    $('run-ocr').addEventListener('click', runOcr);
+    $('run-ocr').addEventListener('click', runRecognition);
+
+    var badgeClose = $('engine-badge-close');
+    if (badgeClose) badgeClose.addEventListener('click', function () { hideEngineBadge(); });
+
+    /* 한도·연결 때문에 OCR로 넘어간 뒤, 사용자가 원하면 AI로 다시 시도 */
+    var badgeRetry = $('engine-badge-retry');
+    if (badgeRetry) {
+      badgeRetry.addEventListener('click', function () {
+        state.visionOff = false;
+        hideEngineBadge();
+        toast('다음 사진부터 AI 인식으로 다시 시도할게요');
+      });
+    }
     $('clear-photos').addEventListener('click', function () {
       if (state.busy) { toast('인식 중에는 비울 수 없어요'); return; }
       clearPhotos();
@@ -886,6 +1081,7 @@
     bindEvents();
     $('run-ocr').disabled = true;
     $('clear-photos').disabled = true;
+    hideEngineBadge();
   }
 
   if (document.readyState === 'loading') {

@@ -115,7 +115,22 @@
     }
     s = s.replace(/^[\s:：,、·|]+/, '').replace(/[\s:：,、·|]+$/, '');
     s = s.replace(PICTO_RE, '').replace(/\s+/g, ' ').trim();
+    s = stripEllipsis(s).replace(/[\s:：,、·|]+$/, '');
     return s;
+  }
+
+  /* 이름 끝에 붙은 말줄임표(... / …) 제거
+     - 검색 정확도를 위해 '카페 まる…' → '카페 まる'
+     - 마침표 하나(2. 다루마)는 목록 번호라 건드리지 않음 */
+  var ELLIPSIS_TAIL = /(?:\s*(?:\.{2,}|…+|‥+|．{2,}))[\s"'”’」』）)\]]*$/;
+  function stripEllipsis(text) {
+    var out = String(text == null ? '' : text).trim();
+    var guard = 0;
+    while (ELLIPSIS_TAIL.test(out) && guard < 6) {
+      out = out.replace(ELLIPSIS_TAIL, '').trim();
+      guard += 1;
+    }
+    return out;
   }
 
   /* 이름 끝에 붙은 전화번호·해시태그·괄호 찌꺼기 제거 */
@@ -252,11 +267,45 @@
     return items;
   }
 
+  /**
+   * AI 비전 서버가 돌려준 가게 이름 배열을 항목으로 변환
+   * 반환 형식은 parseText와 같음: [{ name, checked, note, reason }]
+   *  - 문자열 배열("だるま 新世界総本店")과 { name: … } 객체 둘 다 받습니다
+   *  - 끝에 붙은 말줄임표는 검색 정확도를 위해 떼어 냅니다
+   */
+  function parsePlaces(list) {
+    var items = [];
+    var seen = Object.create(null);
+    var arr = Array.isArray(list) ? list.slice(0, 80) : [];
+
+    arr.forEach(function (raw) {
+      var value = raw;
+      if (value && typeof value === 'object') {
+        value = value.name || value.title || value.place || value.spot || '';
+      }
+      var res = analyze(value);
+      if (res.kind === 'empty') return;
+
+      if (res.kind === 'candidate') {
+        var key = dedupeKey(res.name);
+        if (!key || seen[key]) return;
+        seen[key] = true;
+        items.push({ name: res.name, checked: true, note: '', reason: '' });
+      } else {
+        var nkey = dedupeKey(res.name) + '|' + res.reason;
+        if (nkey && seen[nkey]) return;
+        if (nkey) seen[nkey] = true;
+        items.push({ name: res.name, checked: false, note: '', reason: res.reason });
+      }
+    });
+    return items;
+  }
+
   /* 쪼개진 이름들을 하나로 합치기: 일본어는 붙여쓰고, 영문/숫자 사이만 띄움 */
   function mergeNames(parts) {
     var out = '';
     (parts || []).forEach(function (raw) {
-      var part = String(raw == null ? '' : raw).trim();
+      var part = stripEllipsis(raw);
       if (!part) return;
       if (!out) { out = part; return; }
       var prevCh = out.charAt(out.length - 1);
@@ -269,15 +318,15 @@
 
   /* 타베로그 검색어로 쓸 일본어 부분만 뽑기 */
   function japaneseQuery(name) {
-    var parts = String(name || '').split(/[\s\u3000、,，。・/|()（）「」『』\[\]{}<>:：;；!！?？〜~…"'“”]+/);
+    var parts = stripEllipsis(name).split(/[\s\u3000、,，。・/|()（）「」『』\[\]{}<>:：;；!！?？〜~…"'“”]+/);
     var ja = parts.filter(function (p) { return JP_CHAR.test(p); });
-    var q = ja.join(' ').trim() || String(name || '').trim();
+    var q = ja.join(' ').trim() || stripEllipsis(name);
     return q.slice(0, 60);
   }
 
   function googleMapsUrl(name, regionId) {
     var region = getRegion(regionId);
-    var q = [String(name || '').trim(), region.ja].filter(Boolean).join(' ');
+    var q = [stripEllipsis(name), region.ja].filter(Boolean).join(' ');
     return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
   }
 
@@ -293,6 +342,8 @@
     hasJapanese: hasJapanese,
     uiResidue: uiResidue,
     mergeNames: mergeNames,
+    parsePlaces: parsePlaces,
+    stripEllipsis: stripEllipsis,
     cleanLine: cleanLine,
     analyze: analyze,
     splitParts: splitParts,
