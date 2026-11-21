@@ -253,6 +253,7 @@ textarea::placeholder { color: #B3A79F; }
 
 /* ---------- results ---------- */
 .results-head h2 { display: flex; align-items: center; gap: 7px; }
+.count-wrap { flex: 0 0 auto; }
 .region-tag {
   display: inline-flex; align-items: center;
   padding: 2px 9px; border-radius: 999px;
@@ -348,6 +349,7 @@ textarea::placeholder { color: #B3A79F; }
   transition: transform .15s ease;
 }
 .excluded[open] summary::before { transform: rotate(90deg); }
+.excluded .summary-text { flex: 1 1 auto; }
 .excluded .hint { margin: 2px 0 6px; }
 
 .excluded-item {
