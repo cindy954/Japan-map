@@ -144,8 +144,13 @@
       .trim();
   }
 
-  /* 한 줄 판정: 후보(candidate)인지 노이즈(noise)인지 */
-  function analyze(raw) {
+  /* 한 줄 판정: 후보(candidate)인지 노이즈(noise)인지
+     opts.anyLanguage=true → AI 비전이 이미 가게 이름만 뽑아 준 결과(parsePlaces)용.
+       일본어가 없는 한국어·영문 이름도 후보로 인정하고, 언어 기준 필터는 건너뜁니다.
+       (링크·전화번호·가격처럼 이름이 아닌 값과 중복 제거는 그대로 유지)
+     opts 없음(기본) → 붙여넣기·OCR 텍스트용. 예전처럼 일본어 우선 필터를 씁니다. */
+  function analyze(raw, opts) {
+    var anyLanguage = !!(opts && opts.anyLanguage);
     var name = cleanLine(raw);
     if (!name) return { kind: 'empty', name: '', reason: '' };
     if (name.length < 2) return { kind: 'noise', name: name, reason: '너무 짧음' };
@@ -163,6 +168,13 @@
     var ui = uiResidue(name);
     if (ui.hit && !ui.rest.replace(/[-–—•·|/()[\]{}:：,、.!?~]/g, '')) {
       return { kind: 'noise', name: name, reason: 'UI 문구' };
+    }
+
+    /* AI가 뽑아 준 가게명은 일본어가 없어도(=한국어·영문) 정상 후보 */
+    if (anyLanguage) {
+      if (name.length > 48) return { kind: 'noise', name: name, reason: '설명문' };
+      var anyCleaned = stripNoiseTail(name) || name;
+      return { kind: 'candidate', name: anyCleaned, reason: '' };
     }
 
     if (jp === 0) return { kind: 'noise', name: name, reason: ko ? '한국어만' : '일본어 없음' };
@@ -283,7 +295,8 @@
       if (value && typeof value === 'object') {
         value = value.name || value.title || value.place || value.spot || '';
       }
-      var res = analyze(value);
+      /* AI 결과는 이미 가게 이름만 남은 목록 → 한국어·영문 이름도 후보로 */
+      var res = analyze(value, { anyLanguage: true });
       if (res.kind === 'empty') return;
 
       if (res.kind === 'candidate') {
