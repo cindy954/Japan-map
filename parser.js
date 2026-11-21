@@ -56,10 +56,14 @@
           /\d\s*(?:엔|円|원)(?:\s|$|~|-)/.test(t);
       }
     },
+    { reason: '주소', test: function (t) { return /[市区町村丁目]/.test(t) && /\d+[-\u2212]\d+/.test(t); } },
     { reason: '전화번호', test: function (t) { return /^\+?\d[\d\s()-]{7,}$/.test(t); } },
     { reason: '숫자만', test: function (t) { return /^[\d\s.,%+\-~★☆●○·]+$/.test(t); } },
     { reason: '평점', test: function (t) { return /^★?\s*\d(?:\.\d)?\s*(?:★|☆|\/5|점)?$/.test(t); } }
   ];
+
+  /* 이름이 줄바꿈으로 쪼개졌을 때 꼬리에 붙는 말들 */
+  var NAME_TAIL = /^(?:本店|支店|別館|別邸|離れ|駅前店|西店|東店|北店|南店|[0-9０-９一二三四五六七八九十]+号店)$/;
 
   /* 구글맵 UI에 늘 뜨는 단어들 (지도 캡쳐에서 잡음으로 들어옴) */
   var UI_WORDS = [
@@ -148,14 +152,20 @@
 
     if (jp === 0) return { kind: 'noise', name: name, reason: ko ? '한국어만' : '일본어 없음' };
 
-    if (ui.hit && (ui.rest.match(JP_CHAR_G) || []).length < 2) {
-      return { kind: 'noise', name: name, reason: 'UI 문구' };
+    if (ui.hit) {
+      var restJp = (ui.rest.match(JP_CHAR_G) || []).length;
+      /* UI 단어를 걷어낸 뒤 남는 일본어가 거의 없으면 잡음 */
+      if (restJp <= 3) return { kind: 'noise', name: name, reason: 'UI 문구' };
     }
 
-    /* 지도·간판에서 한두 글자만 튀어나온 잡음 */
-    if (jp <= 2 && name.length <= 2) return { kind: 'noise', name: name, reason: '짧은 잡음' };
-    if (jp <= 2 && name.length <= 4 && /[A-Za-z0-9]/.test(name)) {
-      return { kind: 'noise', name: name, reason: '짧은 잡음' };
+    /* 지도·간판에서 한두 글자만 튀어나온 잡음
+       (단, '本店'처럼 이름이 쪼개져 생긴 꼬리 조각은 후보로 남겨 합치기에 쓸 수 있게) */
+    var isNameTail = NAME_TAIL.test(name.replace(/\s+/g, ''));
+    if (!isNameTail) {
+      if (jp <= 2 && name.length <= 2) return { kind: 'noise', name: name, reason: '짧은 잡음' };
+      if (jp <= 2 && name.length <= 4 && /[A-Za-z0-9]/.test(name)) {
+        return { kind: 'noise', name: name, reason: '짧은 잡음' };
+      }
     }
 
     /* 한국어 문장 속에 일본어 단어가 하나 섞인 경우 */
