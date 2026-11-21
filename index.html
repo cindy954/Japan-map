@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>일본 맛집 캡쳐 → 구글맵·타베로그 1초 변환기</title>
+<meta name="description" content="인스타 릴스·블로그 캡쳐나 붙여넣은 리스트에서 일본어 가게명만 뽑아 구글맵·타베로그 링크로 1초 만에 바꿔주는 무료 웹툴. 사진은 서버로 보내지 않고 브라우저 안에서만 인식해요.">
+<meta name="theme-color" content="#FFF9F5">
+<meta property="og:title" content="일본 맛집 캡쳐 → 구글맵 + 타베로그 1초 변환기">
+<meta property="og:description" content="릴스·블로그 캡쳐에서 일본어 가게명만 골라 구글맵·타베로그 링크와 복사 버튼을 한 번에. 무료, 설치 없음.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23E4562F'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='%23fff'%3E%F0%9F%8D%9C%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://tessdata.projectnaptha.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="styles.css?v=20261121a">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow"><span class="dot" aria-hidden="true"></span>JAPAN FOOD MAP HELPER</p>
+    <h1>일본 맛집 캡쳐,<br><em>구글맵 + 타베로그</em>로<br>1초 변환</h1>
+    <p class="lede">릴스·블로그 캡쳐에서 일본어 가게명만 뽑아서<br>지도 링크와 복사 버튼을 만들어 드려요.</p>
+    <ul class="hero-badges">
+      <li>📷 여러 장 한 번에</li>
+      <li>🆓 무료 · 설치 없음</li>
+      <li>🔒 사진은 브라우저 안에서만</li>
+    </ul>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <noscript>
+    <p class="card notice">자바스크립트를 켜야 사용할 수 있어요.</p>
+  </noscript>
+
+  <section class="card sample">
+    <div class="sample-text">
+      <strong>처음이세요?</strong>
+      <p>예시 리스트로 바로 눌러볼 수 있어요.</p>
+    </div>
+    <button class="btn primary" id="sample-btn" type="button">예시 리스트로 테스트해보기</button>
+  </section>
+
+  <section class="card input-card">
+    <div class="tabs" role="tablist" aria-label="입력 방식">
+      <button class="tab is-active" id="tab-photo" type="button" role="tab" aria-selected="true" aria-controls="panel-photo" data-tab="photo">📷 사진 업로드</button>
+      <button class="tab" id="tab-text" type="button" role="tab" aria-selected="false" aria-controls="panel-text" data-tab="text">⌨️ 텍스트 붙여넣기</button>
+    </div>
+
+    <div class="panel" id="panel-photo" role="tabpanel" aria-labelledby="tab-photo">
+      <label class="dropzone" id="dropzone" for="file-input">
+        <span class="dz-icon" aria-hidden="true">🖼️</span>
+        <span class="dz-title">캡쳐 사진 올리기</span>
+        <span class="dz-sub">여러 장 선택 가능 · 스크롤 캡쳐도 OK</span>
+        <input class="visually-hidden" type="file" id="file-input" accept="image/*" multiple>
+      </label>
+
+      <div class="thumbs" id="thumbs" hidden></div>
+
+      <div class="progress" id="progress" hidden>
+        <div class="bar"><span class="bar-fill" id="bar-fill"></span></div>
+        <p class="progress-text" id="progress-text">준비 중…</p>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="run-ocr" type="button">일본어 가게명 뽑기</button>
+        <button class="btn ghost" id="clear-photos" type="button">사진 비우기</button>
+      </div>
+
+      <p class="hint">첫 인식 때 일본어 인식 데이터(약 20MB)를 한 번만 내려받아요. 그다음부터는 캐시돼서 빨라요. 사진은 어디에도 업로드되지 않고 이 브라우저 안에서만 처리돼요.</p>
+    </div>
+
+    <div class="panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden>
+      <label class="field-label" for="paste-input">복사해 둔 리스트나 캡션을 붙여넣으세요</label>
+      <textarea id="paste-input" rows="7" spellcheck="false" placeholder="예)&#10;1. だるま 新世界総本店&#10;2. 自由軒 難波本店&#10;3. あつた蓬莱軒 本店"></textarea>
+      <div class="row-actions">
+        <button class="btn primary" id="parse-text" type="button">리스트 변환하기</button>
+        <button class="btn ghost" id="paste-clipboard" type="button">📋 클립보드에서</button>
+      </div>
+      <p class="hint">줄바꿈·쉼표로 나뉜 목록이면 그대로 변환돼요. 일본어가 없는 줄(한국어 설명, 시간, 링크)은 자동으로 접어 둘게요.</p>
+    </div>
+  </section>
+
+  <section class="card region">
+    <div class="card-head">
+      <h2>어느 지역이에요?</h2>
+      <p class="hint">고른 지역명이 구글맵 검색어에 붙어서 엉뚱한 동명 가게를 걸러 줘요. 타베로그도 그 지역 안에서 찾아요.</p>
+    </div>
+    <div class="chips" id="region-chips" role="group" aria-label="지역 선택"></div>
+  </section>
+
+  <section class="card results" id="results" hidden>
+    <div class="card-head">
+      <h2><span id="result-count">0</span>곳 <span class="region-tag" id="result-region">일본 전체</span></h2>
+      <p class="hint">가게 이름을 눌러 바로 고칠 수 있어요. 고치면 링크도 같이 바뀌어요.</p>
+    </div>
+
+    <div class="bulk">
+      <button class="btn tiny" id="copy-names" type="button">이름만 복사</button>
+      <button class="btn tiny" id="copy-links" type="button">링크까지 복사</button>
+      <button class="btn tiny ghost" id="clear-all" type="button">전체 삭제</button>
+    </div>
+
+    <div class="places" id="place-list"></div>
+
+    <button class="btn add" id="add-place" type="button">+ 가게 직접 추가</button>
+
+    <details class="excluded" id="excluded" hidden>
+      <summary>후보에서 뺀 줄 <span id="excluded-count">0</span>개 보기</summary>
+      <p class="hint">한국어 설명·시간·가격·링크로 보이는 줄이에요. 체크하면 결과로 올라가요.</p>
+      <div class="excluded-list" id="excluded-list"></div>
+    </details>
+  </section>
+
+  <section class="how">
+    <h2>이렇게 쓰면 돼요</h2>
+    <ol>
+      <li>릴스·블로그에서 맛집 캡쳐를 찍거나, 정리해 둔 리스트를 붙여넣기</li>
+      <li>여행 갈 지역을 고르기 (오사카·도쿄·나고야 등)</li>
+      <li>가게마다 <strong>📍 구글맵</strong> · <strong>🍽️ 타베로그</strong> · <strong>📋 복사</strong> 버튼 사용</li>
+    </ol>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <p class="credit">made by <a href="https://www.instagram.com/cindy_travelus/" target="_blank" rel="noopener">@cindy_travelus</a></p>
+  <p class="foot-note">사진은 서버로 전송되지 않고 브라우저 안에서만 인식돼요 · 무료로 쓰세요 🇯🇵</p>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="parser.js?v=20261121a"></script>
+<script src="app.js?v=20261121a"></script>
+</body>
+</html>
