@@ -61,6 +61,30 @@
     { reason: '평점', test: function (t) { return /^★?\s*\d(?:\.\d)?\s*(?:★|☆|\/5|점)?$/.test(t); } }
   ];
 
+  /* 구글맵 UI에 늘 뜨는 단어들 (지도 캡쳐에서 잡음으로 들어옴) */
+  var UI_WORDS = [
+    '메뉴', '리뷰', '사진', '경로', '저장', '영업중', '영업 중', '길찾기', '공유', '전화', '홈페이지',
+    '더보기', '지도', '근처', '검색', '평점', '예약', '주소', '영업시간', '즐겨찾기', '저장됨',
+    '길안내', '개요', '리뷰더보기', '혼잡', '출발', '도착', '현재', '오늘', '탐색', '리뷰남기기',
+    '메뉴더보기', '전체메뉴', '가까운', '주변',
+    'メニュー', '口コミ', 'クチコミ', '写真', '経路', '保存', '営業中', '営業時間', '電話', 'サイト',
+    '共有', '地図', 'ルート', '現在地', '予約', '住所', 'ホームページ', 'もっと見る', '検索', '近く',
+    'レビュー', '混雑', '出発', '到着', 'お気に入り', '写真を見る'
+  ].map(function (w) { return w.replace(/\s+/g, ''); });
+
+  /* 줄에서 UI 단어를 걷어내고 남는 글자 확인 */
+  function uiResidue(text) {
+    var compact = String(text || '').replace(/\s+/g, '');
+    var hit = false;
+    UI_WORDS.forEach(function (word) {
+      if (word && compact.indexOf(word) !== -1) {
+        hit = true;
+        compact = compact.split(word).join('');
+      }
+    });
+    return { hit: hit, rest: compact };
+  }
+
   function getRegion(id) {
     for (var i = 0; i < REGIONS.length; i++) {
       if (REGIONS[i].id === id) return REGIONS[i];
@@ -116,7 +140,24 @@
     var jp = (name.match(JP_CHAR_G) || []).length;
     var ko = (name.match(HANGUL_G) || []).length;
 
+    /* 구글맵 UI 문구만 있는 줄 (메뉴·리뷰·경로·영업 중 …) */
+    var ui = uiResidue(name);
+    if (ui.hit && !ui.rest.replace(/[-–—•·|/()[\]{}:：,、.!?~]/g, '')) {
+      return { kind: 'noise', name: name, reason: 'UI 문구' };
+    }
+
     if (jp === 0) return { kind: 'noise', name: name, reason: ko ? '한국어만' : '일본어 없음' };
+
+    if (ui.hit && (ui.rest.match(JP_CHAR_G) || []).length < 2) {
+      return { kind: 'noise', name: name, reason: 'UI 문구' };
+    }
+
+    /* 지도·간판에서 한두 글자만 튀어나온 잡음 */
+    if (jp <= 2 && name.length <= 2) return { kind: 'noise', name: name, reason: '짧은 잡음' };
+    if (jp <= 2 && name.length <= 4 && /[A-Za-z0-9]/.test(name)) {
+      return { kind: 'noise', name: name, reason: '짧은 잡음' };
+    }
+
     /* 한국어 문장 속에 일본어 단어가 하나 섞인 경우 */
     if (ko > jp * 3 && name.length > 12) return { kind: 'noise', name: name, reason: '한국어 설명' };
     if (name.length > 48) return { kind: 'noise', name: name, reason: '설명문' };
@@ -201,6 +242,21 @@
     return items;
   }
 
+  /* 쪼개진 이름들을 하나로 합치기: 일본어는 붙여쓰고, 영문/숫자 사이만 띄움 */
+  function mergeNames(parts) {
+    var out = '';
+    (parts || []).forEach(function (raw) {
+      var part = String(raw == null ? '' : raw).trim();
+      if (!part) return;
+      if (!out) { out = part; return; }
+      var prevCh = out.charAt(out.length - 1);
+      var nextCh = part.charAt(0);
+      var needSpace = /[A-Za-z0-9]/.test(prevCh) || /[A-Za-z0-9]/.test(nextCh);
+      out += (needSpace ? ' ' : '') + part;
+    });
+    return out.replace(/\s+/g, ' ').trim();
+  }
+
   /* 타베로그 검색어로 쓸 일본어 부분만 뽑기 */
   function japaneseQuery(name) {
     var parts = String(name || '').split(/[\s\u3000、,，。・/|()（）「」『』\[\]{}<>:：;；!！?？〜~…"'“”]+/);
@@ -225,6 +281,8 @@
     REGIONS: REGIONS,
     getRegion: getRegion,
     hasJapanese: hasJapanese,
+    uiResidue: uiResidue,
+    mergeNames: mergeNames,
     cleanLine: cleanLine,
     analyze: analyze,
     splitParts: splitParts,

@@ -365,6 +365,53 @@ textarea::placeholder { color: #B3A79F; }
   font-size: 10.5px; font-weight: 800; white-space: nowrap;
 }
 
+/* ---------- 선택한 줄 합치기 ---------- */
+.place.is-merge { border-color: #F5CEBE; background: #FFFBF8; }
+.place.is-picked {
+  border-color: var(--accent);
+  background: #FFF3EC;
+  box-shadow: 0 0 0 1.5px var(--accent) inset;
+}
+
+.merge-bar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  width: calc(100% - 24px);
+  max-width: 616px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(35, 28, 23, .96);
+  color: #fff;
+  box-shadow: 0 16px 32px -14px rgba(0, 0, 0, .55);
+  z-index: 40;
+}
+.merge-info { flex: 1 1 auto; min-width: 0; }
+.merge-info strong { display: block; font-size: 12.5px; font-weight: 800; }
+.merge-preview {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #E8DCD3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.merge-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.merge-bar .btn { min-height: 38px; padding: 0 13px; font-size: 13px; border-radius: 10px; }
+.merge-bar .btn.primary { box-shadow: none; }
+.merge-bar .btn.ghost {
+  background: rgba(255, 255, 255, .14);
+  border-color: rgba(255, 255, 255, .24);
+  color: #fff;
+}
+.merge-bar .btn:disabled { opacity: .45; }
+
+body.merge-open { padding-bottom: 96px; }
+
 /* ---------- how / footer ---------- */
 .how { margin: 20px 0 0; padding: 0 2px; }
 .how h2 { font-size: 13.5px; font-weight: 800; color: var(--ink-2); margin-bottom: 8px; }

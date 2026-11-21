@@ -48,7 +48,9 @@
     items: [],
     photos: [],
     busy: false,
-    seq: 0
+    seq: 0,
+    mergeMode: false,
+    mergeSel: {}
   };
 
   var tesseractPromise = null;
@@ -486,12 +488,21 @@
   function cardHtml(it) {
     var maps = P.googleMapsUrl(it.name, state.regionId);
     var tabelog = P.tabelogUrl(it.name, state.regionId);
-    return '<article class="place" data-id="' + it.id + '">' +
-      '<div class="place-main">' +
-        '<label class="check" title="목록에서 빼기">' +
+    var picked = !!state.mergeSel[it.id];
+    var leftBox = state.mergeMode
+      ? '<label class="check" title="합칠 줄 선택">' +
+          '<input type="checkbox" data-act="merge-pick"' + (picked ? ' checked' : '') +
+          ' aria-label="' + esc(it.name) + ' 합칠 줄로 선택">' +
+          '<span class="check-mark" aria-hidden="true"></span>' +
+        '</label>'
+      : '<label class="check" title="목록에서 빼기">' +
           '<input type="checkbox" checked data-act="toggle" aria-label="' + esc(it.name) + ' 목록에서 빼기">' +
           '<span class="check-mark" aria-hidden="true"></span>' +
-        '</label>' +
+        '</label>';
+    return '<article class="place' + (state.mergeMode ? ' is-merge' : '') + (picked ? ' is-picked' : '') +
+      '" data-id="' + it.id + '">' +
+      '<div class="place-main">' +
+        leftBox +
         '<input class="place-name" type="text" value="' + esc(it.name) + '" data-act="rename" ' +
           'aria-label="가게 이름" spellcheck="false" autocomplete="off" autocapitalize="off">' +
         '<button class="icon-btn" type="button" data-act="remove" aria-label="이 항목 삭제">✕</button>' +
@@ -537,6 +548,102 @@
     $('copy-links').disabled = filledItems().length === 0;
     $('clear-all').disabled = state.items.length === 0;
     $('add-place').disabled = state.items.length >= MAX_ITEMS;
+    $('merge-start').disabled = state.mergeMode || filledItems().length < 2;
+
+    /* 합치기 모드: 남아 있는 선택만 유지하고 막대를 갱신 */
+    if (state.mergeMode) {
+      var alive = {};
+      items.forEach(function (it) { if (state.mergeSel[it.id]) alive[it.id] = true; });
+      state.mergeSel = alive;
+      $('merge-bar').hidden = false;
+      document.body.classList.add('merge-open');
+      $('result-hint').textContent = '합칠 줄을 체크하고 아래 [합치기]를 누르세요. 이름은 자동으로 붙여집니다.';
+      updateMergeBar();
+    } else {
+      $('merge-bar').hidden = true;
+      document.body.classList.remove('merge-open');
+      $('result-hint').textContent = '가게 이름을 눌러 바로 고칠 수 있어요. 고치면 링크도 같이 바뀌어요.';
+    }
+  }
+
+  /* ---------------- 선택한 줄 합치기 ---------------- */
+
+  function mergePicked() {
+    return state.items.filter(function (it) { return it.checked && state.mergeSel[it.id]; });
+  }
+
+  function updateMergeBar() {
+    var picked = mergePicked();
+    var names = picked.map(function (it) { return it.name; })
+      .filter(function (n) { return String(n || '').trim(); });
+    $('merge-count').textContent = String(picked.length);
+    $('merge-preview').textContent = names.length >= 2
+      ? P.mergeNames(names)
+      : '합칠 줄을 2개 이상 체크하세요';
+    $('merge-apply').disabled = names.length < 2;
+  }
+
+  function startMerge() {
+    if (filledItems().length < 2) {
+      toast('합칠 항목이 2개 이상 있어야 해요');
+      return;
+    }
+    state.mergeMode = true;
+    state.mergeSel = {};
+    renderResults();
+  }
+
+  function endMerge(silent) {
+    state.mergeMode = false;
+    state.mergeSel = {};
+    renderResults();
+    if (!silent) toast('합치기를 취소했어요');
+  }
+
+  function applyMerge() {
+    var picked = mergePicked();
+    var names = picked.map(function (it) { return it.name; })
+      .filter(function (n) { return String(n || '').trim(); });
+    if (names.length < 2) {
+      toast('합칠 줄을 2개 이상 체크해 주세요');
+      return;
+    }
+
+    var ids = picked.map(function (it) { return it.id; });
+    var firstIndex = state.items.indexOf(picked[0]);
+    var note = '';
+    for (var i = 0; i < picked.length; i += 1) {
+      if (picked[i].note) { note = picked[i].note; break; }
+    }
+
+    var merged = {
+      id: uid(),
+      name: P.mergeNames(names),
+      checked: true,
+      note: note,
+      reason: '',
+      source: 'merge'
+    };
+
+    state.items = state.items.filter(function (it) { return ids.indexOf(it.id) === -1; });
+    if (firstIndex < 0 || firstIndex > state.items.length) firstIndex = state.items.length;
+    state.items.splice(firstIndex, 0, merged);
+
+    var count = names.length;
+    state.mergeMode = false;
+    state.mergeSel = {};
+    renderResults();
+
+    var card = document.querySelector('.place[data-id="' + merged.id + '"]');
+    if (card) {
+      scrollInto(card, { block: 'center' });
+      var input = card.querySelector('.place-name');
+      if (input) {
+        input.focus();
+        try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) { /* 무시 */ }
+      }
+    }
+    toast(count + '줄을 하나로 합쳤어요 · ' + merged.name);
   }
 
   function findItem(id) {
@@ -681,7 +788,12 @@
       if (!host) return;
       var item = findItem(host.getAttribute('data-id'));
       if (!item) return;
-      if (act === 'toggle') {
+      if (act === 'merge-pick') {
+        if (target.checked) state.mergeSel[item.id] = true;
+        else delete state.mergeSel[item.id];
+        host.classList.toggle('is-picked', !!target.checked);
+        updateMergeBar();
+      } else if (act === 'toggle') {
         item.checked = false;
         renderResults();
       } else if (act === 'restore') {
@@ -737,6 +849,10 @@
         input.focus();
       }
     });
+
+    $('merge-start').addEventListener('click', startMerge);
+    $('merge-cancel').addEventListener('click', function () { endMerge(); });
+    $('merge-apply').addEventListener('click', applyMerge);
 
     $('copy-names').addEventListener('click', function () {
       doCopy(formatNames(), filledItems().length + '곳 이름을 복사했어요');

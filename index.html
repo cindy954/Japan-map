@@ -95,10 +95,11 @@
   <section class="card results" id="results" hidden>
     <div class="card-head">
       <h2><span id="result-count">0</span>곳 <span class="region-tag" id="result-region">일본 전체</span></h2>
-      <p class="hint">가게 이름을 눌러 바로 고칠 수 있어요. 고치면 링크도 같이 바뀌어요.</p>
+      <p class="hint" id="result-hint">가게 이름을 눌러 바로 고칠 수 있어요. 고치면 링크도 같이 바뀌어요.</p>
     </div>
 
     <div class="bulk">
+      <button class="btn tiny" id="merge-start" type="button">🔗 선택한 줄 합치기</button>
       <button class="btn tiny" id="copy-names" type="button">이름만 복사</button>
       <button class="btn tiny" id="copy-links" type="button">링크까지 복사</button>
       <button class="btn tiny ghost" id="clear-all" type="button">전체 삭제</button>
@@ -121,6 +122,7 @@
       <li>릴스·블로그에서 맛집 캡쳐를 찍거나, 정리해 둔 리스트를 붙여넣기</li>
       <li>여행 갈 지역을 고르기 (오사카·도쿄·나고야 등)</li>
       <li>가게마다 <strong>📍 구글맵</strong> · <strong>🍽️ 타베로그</strong> · <strong>📋 복사</strong> 버튼 사용</li>
+      <li>이름이 여러 줄로 쪼개졌으면 <strong>🔗 선택한 줄 합치기</strong>로 한 줄로 붙이기</li>
     </ol>
   </section>
 
@@ -130,6 +132,17 @@
   <p class="credit">made by <a href="https://www.instagram.com/cindy_travelus/" target="_blank" rel="noopener">@cindy_travelus</a></p>
   <p class="foot-note">사진은 서버로 전송되지 않고 브라우저 안에서만 인식돼요 · 무료로 쓰세요 🇯🇵</p>
 </footer>
+
+<div class="merge-bar" id="merge-bar" hidden>
+  <div class="merge-info">
+    <strong><span id="merge-count">0</span>줄 선택</strong>
+    <p class="merge-preview" id="merge-preview">합칠 줄을 2개 이상 체크하세요</p>
+  </div>
+  <div class="merge-actions">
+    <button class="btn ghost" id="merge-cancel" type="button">취소</button>
+    <button class="btn primary" id="merge-apply" type="button" disabled>합치기</button>
+  </div>
+</div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
